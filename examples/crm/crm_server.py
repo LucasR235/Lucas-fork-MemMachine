@@ -8,8 +8,10 @@ from .query_constructor import CRMQueryConstructor
 
 load_dotenv()
 
-MEMORY_BACKEND_URL = os.getenv("MEMORY_BACKEND_URL", "http://localhost:8080")
+# Construct URLs from ports
+PORT = int(os.getenv("PORT", "8080"))
 CRM_PORT = int(os.getenv("CRM_PORT", "8000"))
+MEMORY_BACKEND_URL = os.getenv("MEMORY_BACKEND_URL") or f"http://localhost:{PORT}"
 
 DB_CONFIG = {
     "host": os.getenv("POSTGRES_HOST", "localhost"),
@@ -275,4 +277,5 @@ async def shutdown_event():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=CRM_PORT)
+    crm_host = os.getenv("CRM_HOST", "0.0.0.0")
+    uvicorn.run(app, host=crm_host, port=CRM_PORT)
