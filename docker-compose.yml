@@ -27,13 +27,14 @@ services:
   # MemMachine Backend Server
   memmachine:
     build: .
+    image: memmachine:latest
     container_name: memmachine-backend
     working_dir: /app/memmachine/src
     command: python -m server.app
     ports:
-      - "${PORT:-8080}:${PORT:-8080}"
+      - "${PORT:-8083}:${PORT:-8083}"
     environment:
-      - PORT=${PORT:-8080}
+      - PORT=${PORT:-8083}
       - HOST=${HOST:-0.0.0.0}
       - MEMORY_CONFIG=${MEMORY_CONFIG:-configuration.yml}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
@@ -58,17 +59,17 @@ services:
 
   #  Server (middleware)
   crm-server:
-    build: .
+    image: memmachine:latest
     container_name: crm-server
     working_dir: /app/examples
     command: python -m crm.crm_server
     ports:
-      - "${CRM_PORT:-8000}:${CRM_PORT:-8000}"
+      - "${CRM_PORT:-8002}:${CRM_PORT:-8002}"
     environment:
-      - PORT=${PORT:-8080}
-      - CRM_PORT=${CRM_PORT:-8000}
+      - PORT=${PORT:-8083}
+      - CRM_PORT=${CRM_PORT:-8002}
       - CRM_HOST=${CRM_HOST:-0.0.0.0}
-      - MEMORY_BACKEND_URL=http://memmachine:${PORT:-8080}
+      - MEMORY_BACKEND_URL=http://memmachine:${PORT:-8083}
       - POSTGRES_HOST=${POSTGRES_HOST}
       - POSTGRES_PORT=${POSTGRES_PORT}
       - POSTGRES_USER=${POSTGRES_USER}
@@ -82,24 +83,26 @@ services:
 
   # Slack Server
   slack-server:
-    build: .
+    image: memmachine:latest
     container_name: memmachine-slack
     working_dir: /app/examples/crm
     command: python slack_server.py
+    stdin_open: true
+    tty: true
     ports:
       - "${SLACK_PORT:-8001}:${SLACK_PORT:-8001}"
     environment:
-      - PORT=${PORT:-8080}
-      - CRM_PORT=${CRM_PORT:-8000}
-      - SLACK_PORT=${SLACK_PORT:-8001}
+      - PORT=${PORT:-8083}
+      - CRM_PORT=${CRM_PORT:-8002}
+      - SLACK_PORT=${SLACK_PORT:-8003}
       - SLACK_HOST=${SLACK_HOST:-0.0.0.0}
-      - CRM_SERVER_URL=http://crm-server:${CRM_PORT:-8000}
+      - CRM_SERVER_URL=http://crm-server:${CRM_PORT:-8002}
       - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
       - SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET}
       - CRM_CHANNEL_ID=${CRM_CHANNEL_ID}
       - SLACK_ENABLE_HISTORICAL=${SLACK_ENABLE_HISTORICAL}
       - SLACK_MESSAGE_LIMIT=${SLACK_MESSAGE_LIMIT:-5}
-      - DOCKER_CONTAINER=true
+      - SLACK_INTERACTIVE_MODE=${SLACK_INTERACTIVE_MODE:-false}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
     env_file:
       - .env
@@ -111,7 +114,7 @@ services:
   ngrok:
     image: ngrok/ngrok:latest
     container_name: memmachine-ngrok
-    command: http slack-server:${SLACK_PORT:-8001} --log stdout
+    command: http slack-server:${SLACK_PORT:-8003} --log stdout
     environment:
       - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
     depends_on:

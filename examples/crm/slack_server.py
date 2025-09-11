@@ -276,9 +276,11 @@ async def generate_openai_response(formatted_query: str, original_query: str) ->
 
 def get_user_input() -> int:
     """Get number of messages to ingest from environment variable or use default"""
-    # Check if we're in a Docker container or non-interactive environment
-    if not os.isatty(0) or os.getenv("DOCKER_CONTAINER") == "true":
-        # Use environment variable for Docker/non-interactive mode
+    # Check if interactive mode is disabled
+    interactive_mode = os.getenv("SLACK_INTERACTIVE_MODE", "false").lower() == "true"
+    
+    if not interactive_mode or not os.isatty(0):
+        # Use environment variable for non-interactive mode
         message_limit = os.getenv("SLACK_MESSAGE_LIMIT", "5")
         try:
             num_messages = int(message_limit)
