@@ -637,24 +637,24 @@ Do not create new CRM feature names outside of the standard CRM schema: {_featur
 **CRITICAL: You MUST return valid JSON with EXACTLY these two keys: "consolidate_memories" and "keep_memories"**
 
 The proper noop syntax (when no consolidation is needed):
-{
+{{
     "consolidate_memories": [],
     "keep_memories": []
-}
+}}
 
 **REQUIRED OUTPUT FORMAT:**
 <think>insert your chain of thought here</think>
-{
+{{
     "consolidate_memories": [
-        {
+        {{
             "feature": "sales_stage",
             "value": "Validated",
             "tag": "Roche", 
             "metadata": {{}}
-        }
+        }}
     ],
     "keep_memories": [123, 456]
-}
+}}
 
 **IMPORTANT RULES:**
 1. ALWAYS include both "consolidate_memories" and "keep_memories" keys
