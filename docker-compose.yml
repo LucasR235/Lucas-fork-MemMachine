@@ -86,7 +86,7 @@ services:
     image: memmachine:latest
     container_name: memmachine-slack
     working_dir: /app/examples/crm
-    command: python slack_server.py
+    command: sh -c "uv pip install -r requirements.txt && python slack_server.py"
     stdin_open: true
     tty: true
     ports:
