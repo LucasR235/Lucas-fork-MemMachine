@@ -1,82 +1,92 @@
 # Book Logging and Recommendation System
 
-A high-level book logging and recommendation system built on top of the MemMachine profile backend, following the same architecture as the CRM agent.
+A high-level book logging and recommendation system built on top of the MemMachine profile backend, using a generic example server with book-specific adapters.
 
 ## Overview
 
 This system allows users to:
-- Log books with detailed information (title, author, rating, status, review, notes)
+- Log books with detailed information (title, author, rating, status, additional_info)
 - Track reading progress and preferences
 - Get personalized book recommendations
 - View reading statistics and analytics
 
 ## Architecture
 
-The book agent follows the same high-level pattern as the CRM agent:
+The book agent uses a simple, direct architecture:
 
 ### Components
 
-1. **Query Constructor** (`query_constructor.py`)
+1. **Example Server** (`example_server.py`)
+   - Generic FastAPI server for memory operations
+   - Handles storage and retrieval of memories
+   - Provides standard REST API endpoints
+
+2. **Book Query Constructor** (`book_query_constructor.py`)
    - Handles book-specific query formatting
    - Routes different types of book queries (logging, recommendations, analytics)
    - Formats responses for different query types
 
-2. **Prompt System** (`../memmachine/src/memmachine/profile_memory/prompt/book_prompt.py`)
+3. **Book Prompt** (`../memmachine/src/memmachine/profile_memory/prompt/book_prompt.py`)
    - Defines book-specific data extraction rules
    - Handles book profile creation and updates
    - Manages memory consolidation for book data
 
-3. **Server** (`book_server.py`)
-   - FastAPI server for handling book operations
-   - Integrates with MemMachine backend
-   - Provides REST API endpoints for book data
-
 4. **Frontend** (`book_frontend.py`)
    - Streamlit web application
    - User-friendly interface for book logging
+   - Directly integrates with example server and book query constructor
    - Real-time recommendations and analytics
 
 ## Data Model
 
 ### Book Storage Format
 - **Tag**: `bk-{book_name}` (e.g., `bk-Scythe`)
-- **Features**: `book_title`, `author`, `rating`, `status`, `review`, `notes`, `genre`, `style`, `start_date`, `finish_date`
+- **Features**: `book_title`, `author`, `rating`, `status`, `additional_info`, `genre`, `start_date`, `finish_date`
 - **Values**: Corresponding book information
+- **Additional Info**: Unified field containing reviews, notes, quotes, and reading preferences
 
 ### User Storage Format
 - **Tag**: `user-{user_name}` (e.g., `user-alice`)
-- **Features**: `reading_preferences`, `user_preferences`
+- **Features**: `additional_info` (unified field for all user preferences)
 - **Values**: User preference information
 
 ## Usage
 
-### Starting the Book Server
-
+### Quick Start
 ```bash
-cd agents/book
-python book_server.py
+# Start both the server and frontend
+python start_book_system.py
 ```
 
-The server will run on port 8001 by default.
+### Manual Start
+```bash
+# Terminal 1: Start the example server
+python example_server.py
 
-### Running the Frontend
+# Terminal 2: Start the frontend
+streamlit run book_frontend.py
+```
+
+### Environment Variables
 
 ```bash
-cd agents/book
-streamlit run book_frontend.py
+# Optional: Set custom ports
+export BOOK_SERVER_URL="http://localhost:8000"
+export MEMORY_BACKEND_URL="http://localhost:8080"
+export EXAMPLE_SERVER_PORT="8000"
 ```
 
 ### API Endpoints
 
 - `POST /memory` - Store book data
-- `GET /memory` - Retrieve book data
+- `GET /memory` - Retrieve book data  
 - `POST /memory/store-and-search` - Store and search in one operation
 
 ## Features
 
 ### Book Logging
 - **Hard Fields**: Book title, author, rating (1-5), status (to-read, reading, finished, abandoned, on-hold)
-- **Soft Fields**: Review, notes, reading preferences
+- **Unified Field**: Additional Information (reviews, notes, quotes, reading preferences)
 - **Derived Fields**: Genre, style, start/finish dates
 
 ### Recommendations

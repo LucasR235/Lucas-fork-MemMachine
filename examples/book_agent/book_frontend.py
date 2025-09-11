@@ -4,16 +4,61 @@ import requests
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 import json
+import sys
+import asyncio
+from openai import AsyncOpenAI
+from dotenv import load_dotenv
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from book_query_constructor import BookQueryConstructor
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Configuration
-BOOK_SERVER_URL = os.getenv("BOOK_SERVER_URL", "http://localhost:8001")
+BOOK_SERVER_URL = os.getenv("BOOK_SERVER_URL", "http://localhost:8000")  # Updated to match example_server port
 MEMORY_BACKEND_URL = os.getenv("MEMORY_BACKEND_URL", "http://localhost:8080")
 
+# LLM Configuration
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+# Initialize book query constructor
+book_query_constructor = BookQueryConstructor()
+
+# Initialize OpenAI client with validation
+if not OPENAI_API_KEY:
+    print("WARNING: OPENAI_API_KEY not set. Please set it as an environment variable.")
+    print("Example: export OPENAI_API_KEY='your-openai-api-key'")
+    openai_client = None
+else:
+    try:
+        openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+    except Exception as e:
+        print(f"Error initializing OpenAI client: {e}")
+        openai_client = None
+
+async def call_llm(formatted_query: str) -> str:
+    """Call the LLM with the formatted query to get an actual response"""
+    if openai_client is None:
+        return "Error: OpenAI client not initialized. Please check your API key configuration."
+    
+    try:
+        response = await openai_client.responses.create(
+            model=OPENAI_MODEL,
+            input=[{"role": "user", "content": formatted_query}],
+            max_output_tokens=4096,
+            temperature=0.0,
+            top_p=1
+        )
+        return response.output_text
+    except Exception as e:
+        return f"Error calling LLM: {str(e)}"
+
 def store_book_data(user_id: str, query: str) -> Dict[str, Any]:
-    """Store book data in the memory backend"""
+    """Store fixed book input fields (book logging)"""
     try:
         response = requests.post(
-            f"{BOOK_SERVER_URL}/memory/store-and-search",
+            f"{BOOK_SERVER_URL}/memory",
             params={"user_id": user_id, "query": query},
             timeout=30
         )
@@ -26,34 +71,69 @@ def store_book_data(user_id: str, query: str) -> Dict[str, Any]:
     except Exception as e:
         return {"status": "error", "message": f"Error storing book data: {str(e)}"}
 
-def get_book_data(user_id: str, query: str) -> Dict[str, Any]:
-    """Get book data from the memory backend"""
+def process_ai_query(user_id: str, query: str) -> Dict[str, Any]:
+    """Process AI queries with storage + retrieval + AI processing"""
     try:
-        response = requests.get(
+        # First, store the query
+        store_result = store_book_data(user_id, query)
+        if store_result["status"] != "success":
+            return store_result
+        
+        # Then search for relevant data using the GET endpoint
+        search_response = requests.get(
             f"{BOOK_SERVER_URL}/memory",
             params={"user_id": user_id, "query": query, "timestamp": datetime.now().isoformat()},
             timeout=30
         )
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.Timeout:
-        return {"status": "error", "message": "Request timed out. Please try again."}
-    except requests.exceptions.ConnectionError:
-        return {"status": "error", "message": "Cannot connect to server. Please check if the backend is running."}
-    except Exception as e:
-        return {"status": "error", "message": f"Error retrieving book data: {str(e)}"}
-
-
-def get_ai_book_query(user_id: str, query: str) -> Dict[str, Any]:
-    """Get AI-powered book query results for semantic search and reasoning"""
-    try:
-        response = requests.post(
-            f"{BOOK_SERVER_URL}/ai-query",
-            params={"user_id": user_id, "query": query},
-            timeout=30
+        search_response.raise_for_status()
+        
+        search_data = search_response.json()
+        
+        # Extract profile and context from search results
+        profile_memory = search_data.get("data", {}).get("profile", [])
+        episodic_memory = search_data.get("data", {}).get("context", [])
+        
+        # Format the data for book query constructor
+        profile_str = ""
+        if profile_memory:
+            if isinstance(profile_memory, list):
+                profile_str = "\n".join([str(p) for p in profile_memory])
+            else:
+                profile_str = str(profile_memory)
+        
+        context_str = ""
+        if episodic_memory:
+            if isinstance(episodic_memory, list):
+                context_str = "\n".join([str(c) for c in episodic_memory])
+            else:
+                context_str = str(episodic_memory)
+        
+        # Use the book query constructor to format the query properly
+        formatted_query = book_query_constructor.create_query(
+            profile=profile_str,
+            context=context_str,
+            query=query
         )
-        response.raise_for_status()
-        return response.json()
+        
+        # Call the LLM to get an actual response
+        try:
+            # Run the async LLM call in the event loop
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            ai_response = loop.run_until_complete(call_llm(formatted_query))
+            loop.close()
+        except Exception as llm_error:
+            ai_response = f"Error calling LLM: {str(llm_error)}"
+        
+        return {
+            "status": "success",
+            "ai_response": ai_response,
+            "response": ai_response,  # For backward compatibility
+            "formatted_query": formatted_query,
+            "context": context_str,
+            "profile": profile_str
+        }
+        
     except requests.exceptions.Timeout:
         return {"status": "error", "message": "AI request timed out. Please try again."}
     except requests.exceptions.ConnectionError:
@@ -143,15 +223,44 @@ with st.sidebar:
     
     # Connection status
     st.markdown("### System Status")
-    try:
-        # Test backend connection using AI query endpoint
-        response = requests.post(f"{BOOK_SERVER_URL}/ai-query", params={"user_id": "test", "query": "test connection"}, timeout=5)
-        if response.status_code == 200:
+    
+    # Initialize connection status in session state
+    if "connection_status" not in st.session_state:
+        st.session_state.connection_status = None
+        st.session_state.connection_last_checked = None
+    
+    # Only test connection if not recently checked (within last 30 seconds)
+    import time
+    current_time = time.time()
+    should_test_connection = (
+        st.session_state.connection_status is None or 
+        st.session_state.connection_last_checked is None or
+        (current_time - st.session_state.connection_last_checked) > 30
+    )
+    
+    if should_test_connection:
+        try:
+            # Test backend connection using direct server call
+            test_result = store_book_data("test", "test connection")
+            if test_result["status"] == "success":
+                st.session_state.connection_status = "connected"
+                st.success("🟢 Backend Connected")
+            else:
+                st.session_state.connection_status = "warning"
+                st.warning("🟡 Backend Response Issue")
+        except:
+            st.session_state.connection_status = "offline"
+            st.error("🔴 Backend Offline")
+        
+        st.session_state.connection_last_checked = current_time
+    else:
+        # Use cached status
+        if st.session_state.connection_status == "connected":
             st.success("🟢 Backend Connected")
-        else:
+        elif st.session_state.connection_status == "warning":
             st.warning("🟡 Backend Response Issue")
-    except:
-        st.error("🔴 Backend Offline")
+        else:
+            st.error("🔴 Backend Offline")
     
     st.markdown("### Quick Actions")
     if st.button("Clear All Data", use_container_width=True):
@@ -182,11 +291,10 @@ if page == "Log Book":
         finish_date = st.date_input("Finish Date", value=None)
         st.info("💡 Genre will be automatically detected by AI based on book content")
     
-    # Soft Fields (single textbox)
+    # Soft Fields (unified textbox for AI extraction)
     st.markdown("### Additional Information")
-    review = st.text_area("Review", placeholder="Share your thoughts about the book...", height=100)
-    notes = st.text_area("Notes", placeholder="Any specific notes, quotes, or observations...", height=100)
-    preferences = st.text_area("Reading Preferences", placeholder="What genres/authors do you like or dislike?", height=80)
+    st.markdown("Share your thoughts, notes, quotes, reading preferences, or any other book-related information. AI will automatically extract and organize this data.")
+    additional_info = st.text_area("Additional Information", placeholder="Share your thoughts about the book, notes, quotes, reading preferences, or any other book-related information...", height=150)
     
     # Submit button
     if st.button("Log Book", type="primary", use_container_width=True):
@@ -203,9 +311,7 @@ if page == "Log Book":
                     "status": status,
                     "start_date": start_date.strftime("%Y-%m-%d") if start_date else "",
                     "finish_date": finish_date.strftime("%Y-%m-%d") if finish_date else "",
-                    "review": review,
-                    "notes": notes,
-                    "preferences": preferences
+                    "additional_info": additional_info
                 }
                 
                 # Create query string
@@ -222,12 +328,8 @@ if page == "Log Book":
                     query_parts.append(f"Started: {start_date.strftime('%Y-%m-%d')}")
                 if finish_date:
                     query_parts.append(f"Finished: {finish_date.strftime('%Y-%m-%d')}")
-                if review:
-                    query_parts.append(f"Review: {review}")
-                if notes:
-                    query_parts.append(f"Notes: {notes}")
-                if preferences:
-                    query_parts.append(f"Preferences: {preferences}")
+                if additional_info:
+                    query_parts.append(f"Additional Information: {additional_info}")
                 
                 query = ". ".join(query_parts) + "."
                 
@@ -250,7 +352,7 @@ if page == "Log Book":
     if st.button("Ask AI", type="primary"):
         if ai_query:
             with st.spinner("AI is analyzing your reading data..."):
-                ai_result = get_ai_book_query(user_id, ai_query)
+                ai_result = process_ai_query(user_id, ai_query)
             
             if ai_result["status"] == "success":
                 st.markdown("### 🤖 AI Response")
@@ -336,7 +438,7 @@ elif page == "AI Assistant":
     if st.button("Ask AI", type="primary", use_container_width=True):
         if ai_query:
             with st.spinner("AI is analyzing your reading data..."):
-                result = get_ai_book_query(user_id, ai_query)
+                result = process_ai_query(user_id, ai_query)
             
             if result["status"] == "success":
                 st.markdown('<div class="success-message">🤖 AI Response</div>', unsafe_allow_html=True)
