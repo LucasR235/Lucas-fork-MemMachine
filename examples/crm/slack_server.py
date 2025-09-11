@@ -31,8 +31,12 @@ logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 router = APIRouter(prefix="/slack", tags=["Slack"])
 slack_service = SlackService()
 
-MEMORY_BACKEND_URL = os.getenv("MEMORY_BACKEND_URL", "http://localhost:8080")
-CRM_SERVER_URL = os.getenv("CRM_SERVER_URL", "http://localhost:8000")
+# Construct URLs from ports
+PORT = int(os.getenv("PORT", "8080"))
+CRM_PORT = int(os.getenv("CRM_PORT", "8000"))
+SLACK_PORT = int(os.getenv("SLACK_PORT", "8001"))
+MEMORY_BACKEND_URL = os.getenv("MEMORY_BACKEND_URL") or f"http://localhost:{PORT}"
+CRM_SERVER_URL = os.getenv("CRM_SERVER_URL") or f"http://localhost:{CRM_PORT}"
 
 message_counters = {"processed": 0, "skipped": 0, "errors": 0}
 
@@ -271,7 +275,23 @@ async def generate_openai_response(formatted_query: str, original_query: str) ->
 
 
 def get_user_input() -> int:
-    """Get user input for number of messages to ingest"""
+    """Get number of messages to ingest from environment variable or use default"""
+    # Check if we're in a Docker container or non-interactive environment
+    if not os.isatty(0) or os.getenv("DOCKER_CONTAINER") == "true":
+        # Use environment variable for Docker/non-interactive mode
+        message_limit = os.getenv("SLACK_MESSAGE_LIMIT", "5")
+        try:
+            num_messages = int(message_limit)
+            if num_messages < 0:
+                logger.warning("⚠️ Negative SLACK_MESSAGE_LIMIT not allowed, using default (5)")
+                return 5
+            logger.info(f"[SLACK] Using message limit from environment: {num_messages}")
+            return num_messages
+        except ValueError:
+            logger.warning(f"⚠️ Invalid SLACK_MESSAGE_LIMIT '{message_limit}', using default (5)")
+            return 5
+    
+    # Interactive mode for local development
     try:
         print("\n" + "=" * 50)
         print("SLACK HISTORICAL MESSAGE INGESTION")
@@ -321,10 +341,12 @@ async def main():
     """Main function that handles user input before starting server"""
     message_limit = get_user_input()
 
-    config = uvicorn.Config(app, host="0.0.0.0", port=8001)
+    slack_port = int(os.getenv("SLACK_PORT", "8001"))
+    slack_host = os.getenv("SLACK_HOST", "0.0.0.0")
+    config = uvicorn.Config(app, host=slack_host, port=slack_port)
     server = uvicorn.Server(config)
 
-    print("\nStarting Slack server on port 8001...")
+    print(f"\nStarting Slack server on port {slack_port}...")
     print("Server ready for real-time messages!")
     print(f"\n{'='*50}")
     print("HISTORICAL INGESTION")
@@ -456,3 +478,5 @@ async def ingest_historical_messages_with_limit(message_limit: int):
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
