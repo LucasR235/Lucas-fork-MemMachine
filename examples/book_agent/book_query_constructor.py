@@ -24,6 +24,12 @@ def _current_date_iso() -> str:
     """Get current date in ISO format"""
     return datetime.now().strftime("%Y-%m-%d")
 
+def _current_date_dow(tz="America/Los_Angeles") -> str:
+    """Get current date with day of week (matching book prompt format)"""
+    import zoneinfo
+    dt = datetime.now(zoneinfo.ZoneInfo(tz))
+    return f"{dt.strftime('%Y-%m-%d')}[{dt.strftime('%a')}]"
+
 # -----------------------
 # SYSTEM PROMPT CONFIG
 # -----------------------
@@ -38,46 +44,58 @@ Provide accurate, helpful responses based on the user's reading data and prefere
 ROUTING_RULES = '''
 Query Type Detection and Response Routing:
 
-• **Book-Specific Queries** (use focused response format):
-  - "show me Scythe data", "tell me about Dune", "what's my status on Foundation"
-  - "book details for [book name]", "rating for [book]", "notes about [book]"
-  - Single book requests: title, author, rating, status, genre, dates, additional_info
+• **Book Logging Queries** (use book logging format):
+  - "I just finished reading Scythe by Neal Shusterman", "Started reading Dune today"
+  - "Rate this book 4/5", "Mark this as finished", "Add notes about the ending"
+  - "Log book: [book name] by [author]", "Update my reading status"
+  - Book input requests: title, author, rating, status, review, notes
+  - **Frontend Structured Input**: "Book: [title] | Author: [author] | Rating: [rating]/5 | Status: [status] | Review: [review] | Notes: [notes] | Preferences: [preferences]"
   - **IMPORTANT**: Always derive genre from book content, title, or author context
 
-• **Reading Analytics Queries** (use analytics format):
-  - "how many books have I read", "what's my reading progress", "show me my stats"
-  - "which genres do I read most", "what's my average rating", "reading timeline"
-  - "books I rated highly", "recently finished books", "currently reading"
-
-• **Search & Filter Queries** (use organized list format):
-  - "find books with rating 5", "show me sci-fi books", "books by specific author"
-  - "books I'm currently reading", "finished books this year", "highly rated books"
-  - "search for [keyword]", "filter by [criteria]", "books matching [pattern]"
+• **Book Profile Queries** (use Book Output Template):
+  - "show me my Scythe data", "tell me about Dune", "what's my status on Foundation"
+  - "book details for [book name]", "full info on [book name]", "complete book profile"
+  - Requests for comprehensive book information (multiple fields or general overview)
 
 • **Recommendation Queries** (use recommendation format):
   - "recommend me a book", "what should I read next", "suggest something similar to Dune"
   - "find books by Neal Shusterman", "show me sci-fi books", "recommend fantasy"
   - "books like [book name]", "similar to [author]", "recommend by genre"
   - **CRITICAL**: Always check reading history to avoid recommending already read books
+  - Cross-reference book titles and authors from context to prevent duplicates
 
-• **User Preference Queries** (use preference format):
+• **Reading Analytics Queries** (use analytics format):
+  - "how many books have I read", "what's my reading progress", "show me my stats"
+  - "which genres do I read most", "what's my average rating", "reading timeline"
+  - "books I rated highly", "recently finished books", "currently reading"
+
+• **Search & Filter Queries** (use search format):
+  - "find books with rating 5", "show me sci-fi books", "books by specific author"
+  - "books I'm currently reading", "finished books this year", "highly rated books"
+  - "search for [keyword]", "filter by [criteria]", "books matching [pattern]"
+
+• **User Preference Queries** (use general output format):
   - "what genres do I like", "who are my favorite authors", "what's my reading style"
   - "update my preferences", "I like fantasy now", "add author to favorites"
   - "remove genre from dislikes", "update reading preferences"
+  - "show my genre preferences", "what are my reading habits", "my content preferences"
+  - "author preferences", "recommendation preferences", "reading style preferences"
 
 • **General Book Queries** (use appropriate format based on content):
   - "help me organize my reading", "what should I focus on reading"
   - "show me my reading list", "what books need attention"
 
 CRITICAL DECISION TREE:
-1. If query asks for SPECIFIC BOOK information → Use focused response format
-2. If query asks for READING ANALYTICS → Use analytics format
-3. If query asks for SEARCH/FILTER results → Use organized list format
-4. If query asks for RECOMMENDATIONS → Use recommendation format
-5. If query asks for USER PREFERENCES → Use preference format
-6. All other queries → Use appropriate format based on content
+1. If query asks for book LOGGING (adding/updating book data) → Use BOOK_LOGGING_RULES
+2. If query asks for book PROFILE information for a SINGLE book → Use BOOK_OUTPUT_TEMPLATE
+3. If query asks for RECOMMENDATIONS → Use RECOMMENDATION_FORMAT
+4. If query asks for READING ANALYTICS → Use analytics format
+5. If query asks for SEARCH/FILTER results → Use search format
+6. If query asks for USER PREFERENCES → Use general output format
+7. All other queries → Use appropriate format based on content
 
-• **For all queries**: Answer with the data given to the best of your ability while following the general output rules and formatting requirements.
+NEVER use the full Book Output Template for logging requests or multi-book queries.
+• **For all other queries**: Answer with the data given to the best of your ability while following the general output rules and formatting requirements.
 '''
 
 # -----------------------
@@ -149,14 +167,21 @@ Data rules
 # -----------------------
 # FIELD CONFIGURATIONS
 # -----------------------
+# Updated to match book prompt FEATURES exactly
 AVAILABLE_FIELDS = [
     "book_title", "author", "rating", "status", "additional_info", 
-    "genre", "start_date", "finish_date"
+    "genre", "start_date", "finish_date",
+    # User preference features (matching book prompt)
+    "genre_preference", "reading_style", "content_preference", 
+    "author_preference", "reading_habits", "recommendation_preference"
 ]
 
 CANONICAL_FIELDS = [
     "book_title", "author", "rating", "status", "additional_info",
-    "genre", "start_date", "finish_date"
+    "genre", "start_date", "finish_date",
+    # User preference fields
+    "genre_preference", "reading_style", "content_preference", 
+    "author_preference", "reading_habits", "recommendation_preference"
 ]
 
 FIELD_ALIASES = {
@@ -165,18 +190,28 @@ FIELD_ALIASES = {
     "author": "author",
     "rating|score|stars": "rating",
     "status|reading_status": "status",
-    "additional_info|thoughts|opinion|notes|comments|review": "additional_info",
+    # Additional info aliases (replaces review/notes)
+    "additional_info|review|thoughts|opinion|notes|comments": "additional_info",
     "genre|category": "genre",
     "start_date|started": "start_date",
-    "finish_date|finished|completed": "finish_date"
+    "finish_date|finished|completed": "finish_date",
+    # User preference field aliases (matching book prompt)
+    "genre_preference|genre_likes|genre_dislikes": "genre_preference",
+    "reading_style|reading_pace|book_length": "reading_style",
+    "content_preference|themes|settings|characters": "content_preference",
+    "author_preference|favorite_authors|author_likes": "author_preference",
+    "reading_habits|reading_frequency|reading_timing": "reading_habits",
+    "recommendation_preference|discovery_method|risk_tolerance": "recommendation_preference"
 }
+
 
 MULTIPLICITY_RULES = '''
 Multiplicity rules
 • authors: format as "Author Name" or "Author Name, Co-Author Name" for multiple authors. List up to 3, then "+N more".
-• additional_info: timeline field with dates when available
-• genres: list up to 5 genres before "+N more" unless user requests more
-• general lists: for most other multi-item responses, list up to 6 items before "+N more" unless user requests more
+• additional_info: timeline field with subcategorization [review:], [quote:], [note:] - limit to 4 bullets per type, then "+N more" unless user requests more.
+• user preference fields: (genre_preference, reading_style, content_preference, author_preference, reading_habits, recommendation_preference) limit to 6 entries before "+N more" unless user requests more.
+• genres: list up to 5 genres before "+N more" unless user requests more.
+• general lists: for most other multi-item responses, list up to 6 items before "+N more" unless user requests more.
 '''
 
 CLARIFICATION_RULES = '''
@@ -255,60 +290,95 @@ List Queries:
 # BOOK OUTPUT RULES
 # -----------------------
 BOOK_OUTPUT_RULES = '''
-Book-Specific Query Requirements:
-• Use focused response format for single book queries
-• Start with *Book Title* - ALWAYS replace with actual book title
-• Show only relevant fields based on the query
+Book Profile Output Requirements:
+• Use the Book Output Template structure ONLY for comprehensive book profile queries
+• Start with *Book Title* (not ### Book Title) - ALWAYS replace with actual book title
+• Adapt template sections based on query type:
+  - Full profile queries: Use all sections (*Details*, *Review*, *Notes*, *Reading Timeline*)
+  - Rating queries: Focus on *Details* section, include *Review* if relevant
+  - Status queries: Focus on *Details* and *Reading Timeline* sections
+  - Genre queries: Focus on *Details* section, include *Review* if relevant
 • Follow all General Output Requirements above
-• Keep responses concise and focused on what was asked
-• Use "(na)" only for fields the user specifically asked about
-• Format field labels as: *Author*:, *Rating*:, *Status*:, *Genre*:, etc.
+• Length: up to 300 words per book
+• Only show "(na)" for fields the user asked for or standard template fields
+• In Details section, ALL field labels must be bold: *Author*:, *Rating*:, *Status*:, *Genre*:
+• For empty sections, still use proper header format: "*Section Name:*" followed by "(na)" on next line
 
 Multi-Book Responses:
 • One section per book
-• Sort by relevance to query (rating, status, recency)
-• If more than 5 books, show the top 5 and add "+N more"
-• Keep each book entry concise (1-2 lines maximum)
+• Sort by most recent activity date, then by rating: 5-star, 4-star, 3-star, 2-star, 1-star
+• If more than 5 books, show the top 5 and list the rest in one compact line with counts
+• Example: "Also: 3 more books (2 rated 4-star, 1 rated 3-star)"
 
-Note: Focus on answering the specific question asked, not showing all available data.
+Note: The Book Output Template is specifically for book profile queries. Other query types should use appropriate formats as defined in the General Output Rules.
 '''
 
+BOOK_LOGGING_RULES = '''
+Book Logging Requirements (for book input/update queries):
+• Use book logging format for book input requests (title, author, rating, status, review, notes)
+• Start with *Book Title* followed by the logging information
+• Format: *[Book Title]*: [logging information] or (na) if not available
+• For author queries: Show "Author Name" format
+• For multiple authors: List up to 3, then "+N more" if applicable
+• Keep response concise - typically 1-3 lines maximum
+• Do NOT use the full Book Output Template for logging requests
+
+Examples:
+• Query: "I just finished Scythe by Neal Shusterman, rated it 5/5" → Response: "*Scythe*: Logged as finished, rated 5/5 by Neal Shusterman"
+• Query: "Started reading Dune today" → Response: "*Dune*: Status updated to 'reading'"
+• Query: "Add notes: great world-building" → Response: "*[Book]*: Notes added - 'great world-building'"
+'''
 
 RECOMMENDATION_FORMAT = '''
-Recommendation Requirements:
+Recommendation Format Requirements:
 • Use recommendation format for book suggestion queries
 • Start with *Recommendations* header
 • Format each recommendation as: *[Book Title]* by [Author] - [Brief reason]
+• Include rating and genre when available
+• Group by similarity type (similar to X, same author, same genre)
 • Show up to 5 recommendations before "+N more" unless user requests more
+• Include brief explanation for each recommendation
 • **CRITICAL**: NEVER recommend books that are already in the user's reading history
 • Check reading history for book titles and authors to avoid duplicates
 • If no recommendations available, suggest based on reading history or popular books
+
+Examples:
+• Query: "recommend something like Dune" → Response: "*Recommendations*: *Foundation* by Isaac Asimov - Similar epic sci-fi with complex world-building"
+• Query: "what should I read next" → Response: "*Recommendations*: Based on your reading history..."
+• Query: "suggest sci-fi books" → Response: "*Recommendations*: *Hyperion* by Dan Simmons - Award-winning sci-fi with multiple perspectives (avoiding books already read)"
 '''
 
 BOOK_OUTPUT_TEMPLATE = '''
 *Book Output Template Structure:*
 
-For book profile queries, use this flexible structure (REPLACE [Book Title] with actual book title):
+IMPORTANT: Use this template ONLY for comprehensive book profile queries, NOT for logging requests.
+
+For book profile queries, use this structure (REPLACE [Book Title] with actual book title):
 
 *[Book Title]*
 
 *Details:*
-• *Author*: [value or (na)]
-• *Rating*: [value or (na)]
-• *Status*: [value or (na)]
-• *Genre*: [value or (na)]
-• *Started*: [value or (na)]
-• *Finished*: [value or (na)]
+• *Author*: [value or (na)] (value where feature=author)
+• *Rating*: [value or (na)] (value where feature=rating)
+• *Status*: [value or (na)] (value where feature=status)
+• *Genre*: [value or (na)] (value where feature=genre) - Display multiple genres as comma-separated list
+• *Started*: [value or (na)] (value where feature=start_date)
+• *Finished*: [value or (na)] (value where feature=finish_date)
 
-*Additional Information:*
-• Show relevant additional info with dates when available
-• Follow Date Handling Rules for consistent formatting
-• If no additional info, show "(na)"
+*Additional Information:* (value where feature=additional_info)
+• Parse subcategorized content from additional_info field with [review:], [quote:], [note:] tags
+• Group by type: Reviews, Quotes, Notes (show up to 4 bullets per type)
+• Follow Date Handling Rules above for consistent formatting
+• Follow +N More Rules above for formatting
+• Always format header as "*Additional Information:*" (with colon)
+• If no additional info, show "(na)" on the next line, not inline
+• Format each entry as: "[EDTF_date] [TYPE: content]" where TYPE is review, quote, or note
 
-*Reading Timeline:*
-• Show relevant timeline entries with dates
-• Follow Date Handling Rules for consistent formatting
-• If no timeline, show "(na)"
+*Reading Timeline:* (value where feature=start_date, finish_date, status updates)
+• When including dates, place them BEFORE the text: "[--07-29] string"
+• Follow +N More Rules above for formatting
+• If no timeline, show "(na)" on the next line, not inline.
+• Always format as "*Reading Timeline:*" (with colon)
 
 NOTE: Do NOT use this template for logging requests like "I just finished Scythe" - use book logging format instead.
 '''
@@ -330,6 +400,7 @@ CONFIG = {
     "CLARIFICATION_RULES": CLARIFICATION_RULES,
     "GENERAL_OUTPUT_RULES": GENERAL_OUTPUT_RULES,
     "BOOK_OUTPUT_RULES": BOOK_OUTPUT_RULES,
+    "BOOK_LOGGING_RULES": BOOK_LOGGING_RULES,
     "RECOMMENDATION_FORMAT": RECOMMENDATION_FORMAT,
     "BOOK_OUTPUT_TEMPLATE": BOOK_OUTPUT_TEMPLATE,
 }
@@ -390,7 +461,7 @@ class BookQueryConstructor(BaseQueryConstructor):
         try:
             # Get the config JSON for the template
             current_config = CONFIG.copy()
-            current_config["CURRENT_DATE"] = _current_date_iso()
+            current_config["CURRENT_DATE"] = _current_date_dow()
             try:
                 config_json = json.dumps(current_config, indent=2)
             except (TypeError, ValueError) as e:

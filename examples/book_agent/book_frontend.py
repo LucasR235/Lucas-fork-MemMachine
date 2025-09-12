@@ -15,8 +15,8 @@ from book_query_constructor import BookQueryConstructor
 load_dotenv()
 
 # Configuration
-BOOK_SERVER_URL = os.getenv("BOOK_SERVER_URL", "http://localhost:8000")  # Updated to match example_server port
-MEMORY_BACKEND_URL = os.getenv("MEMORY_BACKEND_URL", "http://localhost:8080")
+BOOK_SERVER_URL = os.getenv("BOOK_SERVER_URL", "http://localhost:8002")  # Updated to match example_server port
+MEMORY_BACKEND_URL = os.getenv("MEMORY_BACKEND_URL", "http://localhost:8083")
 
 # LLM Configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -53,6 +53,7 @@ async def call_llm(formatted_query: str) -> str:
         return response.output_text
     except Exception as e:
         return f"Error calling LLM: {str(e)}"
+
 
 def store_book_data(user_id: str, query: str) -> Dict[str, Any]:
     """Store fixed book input fields (book logging)"""
@@ -221,46 +222,6 @@ with st.sidebar:
     st.markdown("### User Settings")
     user_id = st.text_input("Username", value="default_user", help="Enter your username for book tracking")
     
-    # Connection status
-    st.markdown("### System Status")
-    
-    # Initialize connection status in session state
-    if "connection_status" not in st.session_state:
-        st.session_state.connection_status = None
-        st.session_state.connection_last_checked = None
-    
-    # Only test connection if not recently checked (within last 30 seconds)
-    import time
-    current_time = time.time()
-    should_test_connection = (
-        st.session_state.connection_status is None or 
-        st.session_state.connection_last_checked is None or
-        (current_time - st.session_state.connection_last_checked) > 30
-    )
-    
-    if should_test_connection:
-        try:
-            # Test backend connection using direct server call
-            test_result = store_book_data("test", "test connection")
-            if test_result["status"] == "success":
-                st.session_state.connection_status = "connected"
-                st.success("🟢 Backend Connected")
-            else:
-                st.session_state.connection_status = "warning"
-                st.warning("🟡 Backend Response Issue")
-        except:
-            st.session_state.connection_status = "offline"
-            st.error("🔴 Backend Offline")
-        
-        st.session_state.connection_last_checked = current_time
-    else:
-        # Use cached status
-        if st.session_state.connection_status == "connected":
-            st.success("🟢 Backend Connected")
-        elif st.session_state.connection_status == "warning":
-            st.warning("🟡 Backend Response Issue")
-        else:
-            st.error("🔴 Backend Offline")
     
     st.markdown("### Quick Actions")
     if st.button("Clear All Data", use_container_width=True):
@@ -340,7 +301,13 @@ if page == "Log Book":
                     st.markdown('<div class="success-message">✅ Book logged successfully!</div>', unsafe_allow_html=True)
                     st.rerun()
                 else:
-                    st.markdown(f'<div class="error-message">❌ Error: {result["message"]}</div>', unsafe_allow_html=True)
+                    # Show connection error with helpful message
+                    if "Cannot connect to server" in result["message"] or "ConnectionError" in str(result["message"]):
+                        st.markdown('<div class="error-message">🔴 Connection Error: Cannot connect to the backend server. Please check if the server is running.</div>', unsafe_allow_html=True)
+                    elif "timed out" in result["message"].lower():
+                        st.markdown('<div class="error-message">⏱️ Timeout Error: The request took too long. Please try again.</div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown(f'<div class="error-message">❌ Error: {result["message"]}</div>', unsafe_allow_html=True)
     
     # AI-powered book query section
     st.markdown("---")
@@ -371,7 +338,14 @@ if page == "Log Book":
                     st.markdown("#### 🔍 AI Analysis")
                     st.text(ai_result["context"])
             else:
-                st.error(f"❌ Error: {ai_result.get('message', 'Unknown error')}")
+                # Show connection error with helpful message
+                error_msg = ai_result.get('message', 'Unknown error')
+                if "Cannot connect to server" in error_msg or "ConnectionError" in str(error_msg):
+                    st.markdown('<div class="error-message">🔴 Connection Error: Cannot connect to the backend server. Please check if the server is running.</div>', unsafe_allow_html=True)
+                elif "timed out" in error_msg.lower():
+                    st.markdown('<div class="error-message">⏱️ Timeout Error: The request took too long. Please try again.</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown(f'<div class="error-message">❌ Error: {error_msg}</div>', unsafe_allow_html=True)
         else:
             st.warning("⚠️ Please enter a question about your books.")
 
@@ -465,7 +439,14 @@ elif page == "AI Assistant":
                 if st.session_state.quick_query:
                     st.session_state.quick_query = None
             else:
-                st.markdown(f'<div class="error-message">❌ Error: {result.get("message", "Unknown error")}</div>', unsafe_allow_html=True)
+                # Show connection error with helpful message
+                error_msg = result.get("message", "Unknown error")
+                if "Cannot connect to server" in error_msg or "ConnectionError" in str(error_msg):
+                    st.markdown('<div class="error-message">🔴 Connection Error: Cannot connect to the backend server. Please check if the server is running.</div>', unsafe_allow_html=True)
+                elif "timed out" in error_msg.lower():
+                    st.markdown('<div class="error-message">⏱️ Timeout Error: The request took too long. Please try again.</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown(f'<div class="error-message">❌ Error: {error_msg}</div>', unsafe_allow_html=True)
         else:
             st.warning("⚠️ Please enter a question about your books.")
 

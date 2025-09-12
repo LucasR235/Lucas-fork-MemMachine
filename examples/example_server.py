@@ -3,10 +3,20 @@ import requests
 from datetime import datetime
 from fastapi import FastAPI
 from default_query_constructor import DefaultQueryConstructor
+from dotenv import load_dotenv
 
-# Configuration
-MEMORY_BACKEND_URL = os.getenv("MEMORY_BACKEND_URL", "http://localhost:8080")
-EXAMPLE_SERVER_PORT = int(os.getenv("EXAMPLE_SERVER_PORT", "8000"))
+
+load_dotenv()
+
+# Construct URLs from ports
+PORT = int(os.getenv("PORT", "8080"))
+CRM_PORT = int(os.getenv("CRM_PORT", "8000"))
+MEMORY_BACKEND_URL = os.getenv("MEMORY_BACKEND_URL") or f"http://localhost:{PORT}"
+
+DB_CONFIG = {
+    "host": os.getenv("POSTGRES_HOST", "localhost"),
+    "port": int(os.getenv("POSTGRES_PORT", 5432)),
+}
 
 app = FastAPI(title="Server", description="Simple middleware")
 
@@ -212,4 +222,5 @@ async def store_and_search_data(user_id: str, query: str):
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=EXAMPLE_SERVER_PORT)
+    example_host = os.getenv("EXAMPLE_HOST", "0.0.0.0")
+    uvicorn.run(app, host=example_host, port=CRM_PORT)
